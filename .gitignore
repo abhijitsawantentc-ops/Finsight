@@ -1,0 +1,48 @@
+## .NET & Visual Studio
+bin/
+obj/
+*.user
+*.userosscache
+*.suo
+*.userprefs
+*.dbmdl
+*.jfm
+*.opendb
+*.VC.db
+.vs/
+.idea/
+.vscode/
+
+## Build Results
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+build/
+dist/
+publish/
+
+## Testing & Coverage
+TestResults/
+*.trx
+*.coverage
+*.coveragexml
+
+## Docker
+.dockerignore
+docker-compose.override.yml
+
+## Logs and Temp
+logs/
+*.log
+scratch/
+.tmp/
+.cache/
+.agents/
+
+## Secrets & Local Settings
+appsettings.Local.json
+*.local.json
+*.pfx
+*.key
+*.crt

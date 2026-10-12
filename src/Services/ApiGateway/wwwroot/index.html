@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Algorithmic Portfolio Tracker & Quantitative Risk Engine</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+
+  <!-- Top Sticky Header -->
+  <header>
+    <div class="nav-container">
+      <div class="logo-group">
+        <div class="logo-badge">QUANT</div>
+        <div>
+          <div class="brand-title">PORTFOLIO TRACKER</div>
+          <div class="brand-subtitle">Algorithmic Risk Engine • .NET 9 Microservices</div>
+        </div>
+      </div>
+      <div class="header-status-group">
+        <div class="status-pill">
+          <div class="pulse-dot"></div>
+          <span>STREAM ACTIVE</span>
+        </div>
+        <button class="btn btn-primary" onclick="openTradeModal()">+ Execute Order</button>
+      </div>
+    </div>
+    <!-- Live Ticker Strip -->
+    <div class="live-ticker-strip" id="tickerStrip">
+      <span style="color: var(--text-dim);">Connecting to real-time tick ingestion channel...</span>
+    </div>
+  </header>
+
+  <!-- Main Dashboard -->
+  <main>
+    <div class="dashboard-grid">
+
+      <!-- Top Metric Cards -->
+      <div class="metric-card col-3">
+        <div class="card-title">Total Net Asset Value (NAV)</div>
+        <div class="metric-value" id="totalValuation">$0.00</div>
+        <div class="metric-sub">
+          <span>Cash: </span><strong id="cashBalance" style="color: var(--text-main);">$0.00</strong>
+        </div>
+      </div>
+
+      <div class="metric-card col-3">
+        <div class="card-title">Unrealized P&L</div>
+        <div class="metric-value" id="dailyPnL">$0.00 (0.00%)</div>
+        <div class="metric-sub">Real-time mark-to-market</div>
+      </div>
+
+      <div class="metric-card col-3">
+        <div class="card-title">Parametric VaR (95% / 10-Day)</div>
+        <div class="metric-value" id="var95" style="color: var(--accent-red);">$0</div>
+        <div class="metric-sub">
+          <span>CVaR (Expected Shortfall): </span><strong id="cvar95" style="color: var(--accent-red);">$0</strong>
+        </div>
+      </div>
+
+      <div class="metric-card col-3">
+        <div class="card-title">Sharpe & Sortino Ratios</div>
+        <div class="metric-value" style="color: var(--accent-cyan);">
+          <span id="sharpeRatio">0.00</span> <span style="font-size: 0.9rem; color: var(--text-dim);">/</span> <span id="sortinoRatio">0.00</span>
+        </div>
+        <div class="metric-sub">Rf benchmark 4.5% US Treasury</div>
+      </div>
+
+      <!-- Positions Table Panel -->
+      <div class="panel col-8">
+        <div class="panel-header">
+          <div class="panel-title">
+            <span>Portfolio Positions & Holdings</span>
+          </div>
+          <div class="panel-actions">
+            <button class="btn btn-sm" onclick="evaluateRisk()">Recalculate Risk</button>
+          </div>
+        </div>
+        <div class="table-responsive">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Symbol</th>
+                <th>Quantity</th>
+                <th>Avg Cost</th>
+                <th>Current Price</th>
+                <th>Market Value</th>
+                <th>Unrealized P&L</th>
+              </tr>
+            </thead>
+            <tbody id="positionsTableBody">
+              <tr>
+                <td colspan="6" style="text-align: center; color: var(--text-dim); padding: 1.5rem;">Loading positions...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Quick Trade / Order Entry Panel -->
+      <div class="panel col-4">
+        <div class="panel-header">
+          <div class="panel-title">Fast Order Execution</div>
+        </div>
+        <form onsubmit="submitTrade(event)">
+          <div class="form-group">
+            <label class="form-label">Ticker Symbol</label>
+            <select class="form-select" id="tradeSymbol">
+              <option value="AAPL">AAPL - Apple Inc.</option>
+              <option value="NVDA">NVDA - NVIDIA Corp.</option>
+              <option value="MSFT">MSFT - Microsoft Corp.</option>
+              <option value="GOOGL">GOOGL - Alphabet Inc.</option>
+              <option value="AMZN">AMZN - Amazon.com</option>
+              <option value="TSLA">TSLA - Tesla Inc.</option>
+              <option value="BTC-USD">BTC-USD - Bitcoin</option>
+              <option value="ETH-USD">ETH-USD - Ethereum</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Order Type</label>
+            <select class="form-select" id="tradeType">
+              <option value="BUY">BUY - Long Position</option>
+              <option value="SELL">SELL - Liquidate Position</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Shares / Contracts</label>
+            <input type="number" step="any" min="0.01" class="form-input" id="tradeQuantity" value="10" required>
+          </div>
+          <button type="submit" class="btn btn-primary" style="width: 100%; justify-content: center; margin-top: 0.5rem;">Submit Trade Order</button>
+        </form>
+      </div>
+
+      <!-- Monte Carlo Simulation Panel -->
+      <div class="panel col-8">
+        <div class="panel-header">
+          <div class="panel-title">
+            <span>Monte Carlo Stochastic Simulation (MathNet.Numerics)</span>
+          </div>
+          <div class="panel-actions">
+            <button class="btn btn-sm btn-primary" id="btnRunSim" onclick="runMonteCarlo()">Simulate Paths</button>
+          </div>
+        </div>
+        <div class="chart-container">
+          <canvas id="chartCanvas"></canvas>
+        </div>
+      </div>
+
+      <!-- Activity & Event Bus Terminal Feed -->
+      <div class="panel col-4">
+        <div class="panel-header">
+          <div class="panel-title">Microservice Event Stream</div>
+        </div>
+        <div class="event-log" id="activityLog">
+          <div class="log-entry">
+            <span class="log-time">[Startup]</span>
+            <span class="log-source">[System]</span>
+            <span class="log-msg">Connecting to event stream...</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </main>
+
+  <!-- Modal: Trade Execution Dialog -->
+  <div class="modal-overlay" id="tradeModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 style="font-weight: 700;">Place Trading Order</h3>
+        <button class="close-btn" onclick="closeTradeModal()">&times;</button>
+      </div>
+      <form onsubmit="submitTrade(event)">
+        <div class="form-group">
+          <label class="form-label">Asset</label>
+          <select class="form-select" id="modalTradeSymbol">
+            <option value="AAPL">AAPL - Apple Inc.</option>
+            <option value="NVDA">NVDA - NVIDIA Corp.</option>
+            <option value="MSFT">MSFT - Microsoft Corp.</option>
+            <option value="BTC-USD">BTC-USD - Bitcoin</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Side</label>
+          <select class="form-select" id="modalTradeType">
+            <option value="BUY">BUY</option>
+            <option value="SELL">SELL</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Units</label>
+          <input type="number" step="any" min="0.01" class="form-input" id="modalTradeQuantity" value="25" required>
+        </div>
+        <div style="display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 1.25rem;">
+          <button type="button" class="btn" onclick="closeTradeModal()">Cancel</button>
+          <button type="submit" class="btn btn-primary">Confirm Execution</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="/js/app.js"></script>
+</body>
+</html>

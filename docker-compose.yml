@@ -1,0 +1,215 @@
+services:
+  # Infrastructure Services
+  postgres:
+    image: postgres:17-alpine
+    container_name: quant-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: quant_admin
+      POSTGRES_PASSWORD: QuantPassword123!
+      POSTGRES_DB: portfoliotracker_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U quant_admin -d portfoliotracker_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - quant-network
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: quant-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - quant-network
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: quant-rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: quant_broker
+      RABBITMQ_DEFAULT_PASS: QuantBrokerPass123!
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - quant-network
+
+  seq:
+    image: datalust/seq:latest
+    container_name: quant-seq
+    restart: unless-stopped
+    environment:
+      ACCEPT_EULA: "Y"
+    ports:
+      - "5341:80"
+    volumes:
+      - seq_data:/data
+    networks:
+      - quant-network
+
+  # Application Microservices
+  identity-service:
+    build:
+      context: .
+      dockerfile: src/Services/Identity.Service/Dockerfile
+    container_name: quant-identity-service
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__DefaultConnection: "Host=postgres;Port=5432;Database=portfoliotracker_db;Username=quant_admin;Password=QuantPassword123!"
+      RabbitMQ__Host: "rabbitmq"
+      RabbitMQ__Username: "quant_broker"
+      RabbitMQ__Password: "QuantBrokerPass123!"
+      Seq__ServerUrl: "http://seq:80"
+    ports:
+      - "5010:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - quant-network
+
+  marketdata-service:
+    build:
+      context: .
+      dockerfile: src/Services/MarketData.Service/Dockerfile
+    container_name: quant-marketdata-service
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      Redis__ConnectionString: "redis:6379"
+      RabbitMQ__Host: "rabbitmq"
+      RabbitMQ__Username: "quant_broker"
+      RabbitMQ__Password: "QuantBrokerPass123!"
+      Seq__ServerUrl: "http://seq:80"
+    ports:
+      - "5020:8080"
+    depends_on:
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - quant-network
+
+  portfolio-service:
+    build:
+      context: .
+      dockerfile: src/Services/Portfolio.Service/Dockerfile
+    container_name: quant-portfolio-service
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__DefaultConnection: "Host=postgres;Port=5432;Database=portfoliotracker_db;Username=quant_admin;Password=QuantPassword123!"
+      RabbitMQ__Host: "rabbitmq"
+      RabbitMQ__Username: "quant_broker"
+      RabbitMQ__Password: "QuantBrokerPass123!"
+      Redis__ConnectionString: "redis:6379"
+      Seq__ServerUrl: "http://seq:80"
+    ports:
+      - "5030:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - quant-network
+
+  riskengine-service:
+    build:
+      context: .
+      dockerfile: src/Services/RiskEngine.Service/Dockerfile
+    container_name: quant-riskengine-service
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      RabbitMQ__Host: "rabbitmq"
+      RabbitMQ__Username: "quant_broker"
+      RabbitMQ__Password: "QuantBrokerPass123!"
+      Redis__ConnectionString: "redis:6379"
+      Seq__ServerUrl: "http://seq:80"
+    ports:
+      - "5040:8080"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - quant-network
+
+  notification-service:
+    build:
+      context: .
+      dockerfile: src/Services/Notification.Service/Dockerfile
+    container_name: quant-notification-service
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      RabbitMQ__Host: "rabbitmq"
+      RabbitMQ__Username: "quant_broker"
+      RabbitMQ__Password: "QuantBrokerPass123!"
+      Seq__ServerUrl: "http://seq:80"
+    ports:
+      - "5050:8080"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - quant-network
+
+  apigateway:
+    build:
+      context: .
+      dockerfile: src/Services/ApiGateway/Dockerfile
+    container_name: quant-apigateway
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      Seq__ServerUrl: "http://seq:80"
+    ports:
+      - "5000:8080"
+    depends_on:
+      - identity-service
+      - marketdata-service
+      - portfolio-service
+      - riskengine-service
+      - notification-service
+    networks:
+      - quant-network
+
+volumes:
+  postgres_data:
+  redis_data:
+  rabbitmq_data:
+  seq_data:
+
+networks:
+  quant-network:
+    driver: bridge
