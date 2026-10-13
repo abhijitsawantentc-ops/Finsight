@@ -9,7 +9,9 @@ public record MarketQuoteDto(
     decimal Ask,
     long Volume,
     string Currency,
-    DateTime TimestampUtc
+    DateTime TimestampUtc,
+    bool IsStale = false,
+    string? SourceProvider = null
 );
 
 public record PositionDto(
