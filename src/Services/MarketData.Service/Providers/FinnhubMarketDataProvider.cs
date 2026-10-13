@@ -1,12 +1,16 @@
-using System.Globalization;
 using System.Net;
 using System.Text.Json;
 using MarketData.Service.Exceptions;
+using MarketData.Service.Providers.Dtos;
 using Microsoft.Extensions.Logging;
 using Shared.Contracts.Dtos;
 
 namespace MarketData.Service.Providers;
 
+/// <summary>
+/// Market data provider communicating with Finnhub's REST API.
+/// Maps responses via <see cref="FinnhubQuoteResponse"/> to unified <see cref="StockQuote"/>.
+/// </summary>
 public class FinnhubMarketDataProvider : IMarketDataProvider
 {
     private readonly HttpClient _httpClient;
@@ -14,7 +18,7 @@ public class FinnhubMarketDataProvider : IMarketDataProvider
     private readonly ILogger<FinnhubMarketDataProvider> _logger;
 
     public string ProviderName => "Finnhub";
-    public int Priority => 1; // Primary
+    public int Priority => 1; // Primary Provider
 
     public FinnhubMarketDataProvider(
         HttpClient httpClient,
@@ -31,20 +35,25 @@ public class FinnhubMarketDataProvider : IMarketDataProvider
         }
     }
 
-    public async Task<MarketQuoteDto> GetQuoteAsync(string symbol, CancellationToken cancellationToken = default)
+    public async Task<StockQuote> GetQuoteAsync(string symbol, CancellationToken cancellationToken = default)
     {
-        var upperSymbol = symbol.ToUpperInvariant();
+        if (string.IsNullOrWhiteSpace(symbol))
+        {
+            throw new ArgumentException("Ticker symbol cannot be null or empty.", nameof(symbol));
+        }
+
+        var upperSymbol = symbol.Trim().ToUpperInvariant();
         var apiKey = _options.Finnhub.ApiKey;
 
+        // Graceful sandbox fallback for local development without credentials
         if (string.IsNullOrWhiteSpace(apiKey) && _options.EnableSandboxFallback)
         {
-            // Sandbox fallback when running locally without third-party key
-            _logger.LogDebug("Finnhub API key not configured. Generating realistic quote for {Symbol}.", upperSymbol);
+            _logger.LogDebug("Finnhub API key not configured. Generating realistic sandbox quote for {Symbol}.", upperSymbol);
             return GenerateSandboxQuote(upperSymbol);
         }
 
         var endpoint = $"quote?symbol={Uri.EscapeDataString(upperSymbol)}&token={Uri.EscapeDataString(apiKey)}";
-        _logger.LogInformation("Querying primary provider Finnhub for symbol {Symbol}", upperSymbol);
+        _logger.LogInformation("Querying primary market data provider Finnhub for symbol {Symbol}", upperSymbol);
 
         HttpResponseMessage response;
         try
@@ -57,11 +66,26 @@ public class FinnhubMarketDataProvider : IMarketDataProvider
             throw;
         }
 
+        // Provider-specific HTTP Error Handling (Step 3.1)
         if (response.StatusCode == HttpStatusCode.TooManyRequests)
         {
             var retryAfter = response.Headers.RetryAfter?.Delta;
-            _logger.LogWarning("Finnhub returned HTTP 429 Too Many Requests for {Symbol}", upperSymbol);
+            _logger.LogWarning("Finnhub returned HTTP 429 Too Many Requests for {Symbol}. Retry-After: {RetryAfter}",
+                upperSymbol, retryAfter);
             throw new RateLimitExceededException(ProviderName, "Finnhub rate limit exceeded (HTTP 429)", retryAfter);
+        }
+
+        if (response.StatusCode == HttpStatusCode.Unauthorized || response.StatusCode == HttpStatusCode.Forbidden)
+        {
+            _logger.LogError("Finnhub rejected authentication ({StatusCode}) for {Symbol}. Verify configured API key.",
+                response.StatusCode, upperSymbol);
+            throw new MarketDataAuthenticationException(ProviderName, $"Finnhub authentication failed: {response.ReasonPhrase}");
+        }
+
+        if (response.StatusCode == HttpStatusCode.NotFound)
+        {
+            _logger.LogWarning("Finnhub reported symbol {Symbol} not found (HTTP 404)", upperSymbol);
+            throw new SymbolNotFoundException(ProviderName, upperSymbol);
         }
 
         if (!response.IsSuccessStatusCode)
@@ -72,39 +96,38 @@ public class FinnhubMarketDataProvider : IMarketDataProvider
             throw new HttpRequestException($"Finnhub HTTP error {(int)response.StatusCode}: {response.ReasonPhrase}", null, response.StatusCode);
         }
 
+        // Response Parsing & DTO Mapping (Step 3.2)
         var json = await response.Content.ReadAsStringAsync(cancellationToken);
-        using var doc = JsonDocument.Parse(json);
-        var root = doc.RootElement;
-
-        // Finnhub format: { "c": 228.5, "h": 229.0, "l": 227.0, "o": 227.5, "pc": 227.3, "t": 1728835200 }
-        if (!root.TryGetProperty("c", out var currentPriceProp) || currentPriceProp.GetDecimal() <= 0)
+        FinnhubQuoteResponse? quoteDto;
+        try
         {
+            quoteDto = JsonSerializer.Deserialize<FinnhubQuoteResponse>(json);
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogError(ex, "Failed to deserialize Finnhub JSON response for {Symbol}: {Json}", upperSymbol, json);
             if (_options.EnableSandboxFallback)
             {
                 return GenerateSandboxQuote(upperSymbol);
             }
+            throw new HttpRequestException($"Finnhub returned malformed JSON for symbol '{upperSymbol}'.", ex);
+        }
+
+        if (quoteDto == null || !quoteDto.IsValid())
+        {
+            if (_options.EnableSandboxFallback)
+            {
+                _logger.LogWarning("Finnhub returned zero or invalid price data for {Symbol}. Using sandbox fallback.", upperSymbol);
+                return GenerateSandboxQuote(upperSymbol);
+            }
+
             throw new HttpRequestException($"Finnhub returned invalid price data for symbol '{upperSymbol}'.");
         }
 
-        var currentPrice = currentPriceProp.GetDecimal();
-        var spread = Math.Max(0.01m, Math.Round(currentPrice * 0.0005m, 2));
-        var bid = Math.Round(currentPrice - (spread / 2m), 2);
-        var ask = Math.Round(currentPrice + (spread / 2m), 2);
-
-        return new MarketQuoteDto(
-            Symbol: upperSymbol,
-            Price: currentPrice,
-            Bid: bid,
-            Ask: ask,
-            Volume: 10000,
-            Currency: "USD",
-            TimestampUtc: DateTime.UtcNow,
-            IsStale: false,
-            SourceProvider: ProviderName
-        );
+        return quoteDto.ToStockQuote(upperSymbol, ProviderName);
     }
 
-    private MarketQuoteDto GenerateSandboxQuote(string symbol)
+    private StockQuote GenerateSandboxQuote(string symbol)
     {
         var basePrice = symbol switch
         {
@@ -120,7 +143,7 @@ public class FinnhubMarketDataProvider : IMarketDataProvider
         };
 
         var spread = Math.Max(0.01m, Math.Round(basePrice * 0.0005m, 2));
-        return new MarketQuoteDto(
+        return new StockQuote(
             Symbol: symbol,
             Price: basePrice,
             Bid: basePrice - (spread / 2m),

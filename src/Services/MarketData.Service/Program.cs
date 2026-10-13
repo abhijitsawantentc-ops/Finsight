@@ -97,33 +97,7 @@ builder.Services.AddSingleton(resilienceOptions);
 builder.Services.AddSingleton<IPollyResilienceRegistry, PollyResilienceRegistry>();
 
 // 4. Market Data Providers (Primary Finnhub, Secondary Alpha Vantage)
-var providerOptions = new MarketDataProviderOptions
-{
-    Finnhub = new FinnhubOptions
-    {
-        ApiKey = builder.Configuration["MarketData:Providers:Finnhub:ApiKey"] ?? string.Empty,
-        BaseUrl = builder.Configuration["MarketData:Providers:Finnhub:BaseUrl"] ?? "https://finnhub.io/api/v1/"
-    },
-    AlphaVantage = new AlphaVantageOptions
-    {
-        ApiKey = builder.Configuration["MarketData:Providers:AlphaVantage:ApiKey"] ?? string.Empty,
-        BaseUrl = builder.Configuration["MarketData:Providers:AlphaVantage:BaseUrl"] ?? "https://www.alphavantage.co/"
-    },
-    EnableSandboxFallback = builder.Configuration.GetValue<bool>("MarketData:Providers:EnableSandboxFallback", true)
-};
-builder.Services.AddSingleton(providerOptions);
-
-builder.Services.AddHttpClient<FinnhubMarketDataProvider>(client =>
-{
-    client.BaseAddress = new Uri(providerOptions.Finnhub.BaseUrl);
-});
-builder.Services.AddHttpClient<AlphaVantageMarketDataProvider>(client =>
-{
-    client.BaseAddress = new Uri(providerOptions.AlphaVantage.BaseUrl);
-});
-
-builder.Services.AddSingleton<IMarketDataProvider>(sp => sp.GetRequiredService<FinnhubMarketDataProvider>());
-builder.Services.AddSingleton<IMarketDataProvider>(sp => sp.GetRequiredService<AlphaVantageMarketDataProvider>());
+builder.Services.AddMarketDataProviders(builder.Configuration);
 
 // 5. MarketDataOrchestrator
 builder.Services.AddSingleton<IMarketDataOrchestrator, MarketDataOrchestrator>();

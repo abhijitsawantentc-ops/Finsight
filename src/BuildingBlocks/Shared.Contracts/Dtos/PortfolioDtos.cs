@@ -12,7 +12,11 @@ public record MarketQuoteDto(
     DateTime TimestampUtc,
     bool IsStale = false,
     string? SourceProvider = null
-);
+)
+{
+    public StockQuote ToStockQuote() =>
+        new(Symbol, Price, Bid, Ask, Volume, Currency, TimestampUtc, IsStale, SourceProvider);
+}
 
 public record PositionDto(
     Guid PositionId,
